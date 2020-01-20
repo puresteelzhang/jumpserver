@@ -4,7 +4,21 @@
 LDAP 测试工具
 """
 
+import ldap3
 from django.conf import settings
+from ldap3 import SIMPLE
+from ldap3.core.exceptions import (
+    LDAPSocketOpenError,
+    LDAPSocketReceiveError,
+    LDAPSessionTerminatedByServerError,
+    LDAPUserNameIsMandatoryError,
+    LDAPPasswordIsMandatoryError,
+    LDAPInvalidDnError,
+)
+
+from common.utils import get_logger
+
+logger = get_logger(__file__)
 
 
 class LDAPConfigTest(object):
@@ -17,11 +31,11 @@ class LDAPConfigTest(object):
     """
 
     def __init__(self):
-        self.config = self.load_config()
+        self.config = {}
+        self.load_config()
 
-    @staticmethod
-    def load_config():
-        config = {
+    def load_config(self):
+        self.config = {
             'server_uri': settings.AUTH_LDAP_SERVER_URI,
             'bind_dn': settings.AUTH_LDAP_BIND_DN,
             'password':  settings.AUTH_LDAP_BIND_PASSWORD,
@@ -30,48 +44,71 @@ class LDAPConfigTest(object):
             'attr_map': settings.AUTH_LDAP_USER_ATTR_MAP,
             'auth_ldap': settings.AUTH_LDAP
         }
-        return config
+
+    def _test(self, authentication=None, user=None, password=None):
+        host = self.config.get('server_uri')
+        server = ldap3.Server(host)
+        connection = ldap3.Connection(
+            server, user=user, password=password, authentication=authentication
+        )
+        ret = connection.bind()
+        return ret
 
     def test_server_uri(self):
-        import socket
-        server_uri = self.config.get('server_uri', '')
-        start = server_uri.find('//')
-        if start == -1:
-            print('Error: Server uri does not contain ldap:// or ldaps://')
-            return False
-        end = server_uri.rfind(':')
-        if end == -1:
-            print('Error: Server uri does not contain port')
-            return False
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            host = server_uri[start + 2:end]
-            port = int(server_uri[end+1:])
-            s.connect((host, port))
-        except ConnectionRefusedError as e:
-            print('Error: The server uri is unconnectable: {}'.format(e))
-            return False
-        except Exception as e:
-            print('Error: {}'.format(e))
-            return False
-        else:
-            print('Success: Test server uri are connectable')
-            return True
-        finally:
-            s.close()
+        self._test()
 
     def test_bind_dn(self):
-        pass
+        user = self.config.get('bind_dn')
+        password = self.config.get('password')
+        ret = self._test(authentication=SIMPLE, user=user, password=password)
+        if not ret:
+            raise LDAPInvalidDnError('bind dn or password incorrect')
 
-    def test_search_filter(self):
+    def test_search_ou(self):
         pass
 
     def test_attr_map(self):
+        pass
+
+    def test_search_filter(self):
         pass
 
     def test_user_login(self):
         pass
 
     def test_auth_ldap_enable(self):
-        pass
+        return self.config.get('auth_ldap')
+
+    def test(self):
+        try:
+            self.test_server_uri()
+            self.test_bind_dn()
+            self.test_attr_map()
+            self.test_search_filter()
+            self.test_user_login()
+        except LDAPSocketOpenError as e:
+            msg = "Error (LDAP server): Host or port is disconnected => {}"
+            logger.error(msg.format(e), exc_info=True)
+        except LDAPSessionTerminatedByServerError as e:
+            msg = "Error (LDAP server): " \
+                  "The port is not the port of the LDAP service => {}"
+            logger.error(msg.format(e), exc_info=True)
+        except LDAPSocketReceiveError as e:
+            msg = "Error (LDAP server): Please enter the certificate => {}"
+            logger.error(msg.format(e), exc_info=True)
+        except LDAPUserNameIsMandatoryError as e:
+            msg = "Error (Bind dn): Please enter bind dn=> {}"
+            logger.error(msg.format(e), exc_info=True)
+        except LDAPPasswordIsMandatoryError as e:
+            msg = "Error (Bind dn): Please enter password => {}"
+            logger.error(msg.format(e), exc_info=True)
+        except LDAPInvalidDnError as e:
+            msg = "Error (Bind dn): Please enter correct bind dn and password => {}"
+            logger.error(msg.format(e), exc_info=True)
+
+        except Exception as e:
+            logger.error("Error: {}".format(e), exc_info=True)
+        else:
+            pass
+
 
